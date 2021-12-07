@@ -1,3 +1,8 @@
 .idea
 cmake-*
 bin
+.vscode
+build
+paths.txt
+result_debug.csv
+test.csv

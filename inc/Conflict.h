@@ -101,6 +101,25 @@ public:
 		priority = conflict_priority::CARDINAL;
 		// TODO add constraints from mutex reasoning
 	}
+	struct compare_conflict
+	{
+		bool operator()(const shared_ptr<Conflict> c1, const shared_ptr<Conflict> c2) const 
+		{
+			if (c1->priority == c2->priority)
+			{
+				if (c1->type == c2->type)
+				{
+					if (c1->secondary_priority == c2->secondary_priority)
+					{
+						return rand() % 2;
+					}
+					return c1->secondary_priority > c2->secondary_priority;
+				}
+				return c1->type > c2->type;
+			}
+			return c1->priority > c2->priority;
+		}	
+	};
 };
 
 std::ostream& operator << (std::ostream& os, const Conflict& conflict);

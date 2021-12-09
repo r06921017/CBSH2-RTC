@@ -251,6 +251,31 @@ Path SpaceTimeAStar::findPath(const CBSNode& node, const ConstraintTable& initia
 		return findShortestPath(constraint_table, make_pair(start_location, 0), lowerbound);
 }
 
+
+Path SpaceTimeAStar::findPathPeko(const CBSNode& node, const ConstraintTable& initial_constraints,
+	const vector<Path*>& paths, int agent, int lowerbound)
+{
+	num_expanded = 0;
+	num_generated = 0;
+	// build constraint table
+	auto start_time = clock();
+	ConstraintTable constraint_table(initial_constraints);
+	constraint_table.buildPeko(node, agent);
+	runtime_build_CT = (double) (clock() - start_time) / CLOCKS_PER_SEC;
+	if (constraint_table.length_min >= MAX_TIMESTEP ||
+		constraint_table.length_min > constraint_table.length_max ||  // the agent cannot reach its goal location
+		constraint_table.constrained(start_location, 0))  // the agent cannot stay at its start location
+	{
+		return Path();  // return an empty path
+	}
+
+	start_time = clock();
+	constraint_table.buildCAT(agent, paths, node.makespan+1);  // This is for soft constraints
+	runtime_build_CAT = (double) (clock() - start_time) / CLOCKS_PER_SEC;
+	assert(constraint_table.getNumOfLandmarks() == 0);
+	return findShortestPath(constraint_table, make_pair(start_location, 0), lowerbound);
+}
+
 // find a shortest path from start_state to the goal location
 Path SpaceTimeAStar::findShortestPath(ConstraintTable& constraint_table, const pair<int, int> start_state, int lowerbound)
 {

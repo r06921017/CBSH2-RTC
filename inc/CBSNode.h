@@ -49,12 +49,14 @@ public:
 
 	// The chosen conflict
 	shared_ptr<Conflict> conflict;
+	vector<shared_ptr<Conflict>> sorted_conflicts;
 
 	boost::unordered_map<int, int> conflictGraph; //<edge index, weight> // TODO: This can be deleted.
 	CBSNode* parent;
 
 	list<pair<int, Path>> paths; // new paths
 	list<Constraint> constraints; // new constraints
+	unordered_map<int, list<list<Constraint>>> ag_constraints;  // new constraints
 
 
 	int g_val;

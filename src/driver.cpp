@@ -51,6 +51,7 @@ int main(int argc, char** argv)
 		("targetReasoning", po::value<bool>()->default_value(true), "Using target reasoning")
 		("restart", po::value<int>()->default_value(1), "number of restart times (at least 1)")
 		("sipp", po::value<bool>()->default_value(false), "using sipp as the single agent solver")
+		("kConf", po::value<int>()->default_value(INT_MAX), "paralle k-conflicts resolution approach")
 		;
 
 	po::variables_map vm;
@@ -151,15 +152,25 @@ int main(int argc, char** argv)
     //////////////////////////////////////////////////////////////////////
 	double runtime = 0;
 	int min_f_val = 0;
-	for (int i = 0; i < runs; i++)
+	int in_k = vm["kConf"].as<int>();
+	if (in_k < INT_MAX)
 	{
+		cbs.setKConflicts(in_k);
 		cbs.clear();
-		cbs.solve(vm["cutoffTime"].as<double>(), min_f_val);
-		runtime += cbs.runtime;
-		if (cbs.solution_found)
-			break;
-		min_f_val = (int) cbs.min_f_val;
-		cbs.randomRoot = true;
+		cbs.solvePeko(vm["cutoffTime"].as<double>(), min_f_val);
+	}
+	else
+	{
+		for (int i = 0; i < runs; i++)
+		{
+			cbs.clear();
+			cbs.solve(vm["cutoffTime"].as<double>(), min_f_val);
+			runtime += cbs.runtime;
+			if (cbs.solution_found)
+				break;
+			min_f_val = (int) cbs.min_f_val;
+			cbs.randomRoot = true;
+		}
 	}
 	cbs.runtime = runtime;
 

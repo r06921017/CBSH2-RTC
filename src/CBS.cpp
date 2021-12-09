@@ -214,6 +214,13 @@ void CBS::computePriorityForConflict(Conflict& conflict, const CBSNode& node)
 
 void CBS::classifyConflicts(CBSNode& node)
 {
+	if (screen > 2)
+	{
+		cout << "Unknown conflicts" << endl;
+		for (const auto& conflict : node.unknownConf)
+			cout << *conflict << endl;
+	}
+
 	// Classify all conflicts in unknownConf
 	while (!node.unknownConf.empty())
 	{
@@ -224,6 +231,9 @@ void CBS::classifyConflicts(CBSNode& node)
 		tie(a, loc1, loc2, timestep, type) = con->constraint1.back();
 		node.unknownConf.pop_front();
 
+
+		if (screen > 2)
+			printPaths();
 
 		bool cardinal1 = false, cardinal2 = false;
 		if (timestep >= (int) paths[a1]->size())
@@ -336,8 +346,44 @@ void CBS::classifyConflicts(CBSNode& node)
 
 	// remove conflicts that cannot be chosen, to save some memory
 	removeLowPriorityConflicts(node.conflicts);
+
+	// Sort the conflicts
+	sortConflicts(node);
 }
 
+void CBS::sortConflicts(CBSNode& node)
+{
+	pairing_heap<shared_ptr<Conflict>, compare<Conflict::compare_conflict>> tmp_conflicts;
+	if (!node.conflicts.empty())
+	{
+		for (shared_ptr<Conflict> conf : node.conflicts)
+			tmp_conflicts.push(conf);
+	}
+
+	for (shared_ptr<Conflict> conf : node.unknownConf)
+		tmp_conflicts.push(conf);
+
+	k_val = min((int)tmp_conflicts.size(), k_val);  // k_val may decrease if #conflicts < #processors
+	for (int i = 0; i < k_val; i++)  // Pick the top k conflicts
+	{
+		shared_ptr<Conflict> top_conf = tmp_conflicts.top(); 
+		tmp_conflicts.pop();
+		node.sorted_conflicts.push_back(top_conf);
+	}
+
+	if (screen > 2)
+	{
+		for (const auto& conf : node.conflicts)
+			cout << *conf << endl;
+		cout << "===============================" << endl;
+		cout << "Sorted conflicts:" << endl;
+		for (const auto& conf : node.sorted_conflicts)
+			cout << *conf << "priority:" << conf->priority << ", type:" << conf->type << ", second_pri:" << conf->secondary_priority << endl;
+		cout << "===============================" << endl;
+	}
+
+	return;
+}
 
 void CBS::removeLowPriorityConflicts(list<shared_ptr<Conflict>>& conflicts) const
 {
@@ -380,6 +426,35 @@ bool CBS::findPathForSingleAgent(CBSNode* node, int ag, int lowerbound)
 	// updateReservationTable(cat, ag, *node);
 	// find a path
 	Path new_path = search_engines[ag]->findPath(*node, initial_constraints[ag], paths, ag, lowerbound);
+	num_LL_expanded += search_engines[ag]->num_expanded;
+	num_LL_generated += search_engines[ag]->num_generated;
+	runtime_build_CT += search_engines[ag]->runtime_build_CT;
+	runtime_build_CAT += search_engines[ag]->runtime_build_CAT;
+	runtime_path_finding += (double) (clock() - t) / CLOCKS_PER_SEC;
+	if (!new_path.empty())
+	{
+		assert(!isSamePath(*paths[ag], new_path));
+		node->paths.emplace_back(ag, new_path);
+		node->g_val = node->g_val - (int) paths[ag]->size() + (int) new_path.size();
+		paths[ag] = &node->paths.back().second;
+		node->makespan = max(node->makespan, new_path.size() - 1);
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
+
+bool CBS::findPathForSingleAgentPeko(CBSNode* node, int ag, int lowerbound)
+{
+	clock_t t = clock();
+	// build reservation table
+	// CAT cat(node->makespan + 1);  // initialized to false
+	// updateReservationTable(cat, ag, *node);
+	// find a path
+	Path new_path = search_engines[ag]->findPathPeko(*node, initial_constraints[ag], paths, ag, lowerbound);
 	num_LL_expanded += search_engines[ag]->num_expanded;
 	num_LL_generated += search_engines[ag]->num_generated;
 	runtime_build_CT += search_engines[ag]->runtime_build_CT;
@@ -512,6 +587,104 @@ bool CBS::generateChild(CBSNode* node, CBSNode* parent)
 }
 
 
+bool CBS::generateChildPeko(CBSNode* node, CBSNode* parent, const vector<bool>& constraint_assignments)
+{
+	clock_t t1 = clock();
+	node->parent = parent;
+	node->g_val = parent->g_val;
+	node->makespan = parent->makespan;
+	node->depth = parent->depth + 1;
+
+	assert(constraint_assignments.size() == k_val);
+
+	if (screen > 2)
+	{
+		cout << "All conflict of node:" << endl;
+		printConflicts(*parent);
+		cout << "------------------------------------" << endl;
+		cout << "Sorted conflicts:" << endl;
+		for (const auto& conf : parent->sorted_conflicts)
+			cout << *conf << endl;
+		cout << endl;
+	}
+
+	for (int i = 0; i < k_val; i++)
+	{
+		int replan_ag = -1;
+		if (!constraint_assignments[i])
+		{
+			replan_ag = parent->sorted_conflicts[i]->a1;
+			if (node->ag_constraints.find(replan_ag) == node->ag_constraints.end())  // New replanned agent
+			{
+				list<list<Constraint>> tmp_cons;
+				tmp_cons.push_back(parent->sorted_conflicts[i]->constraint1);
+				node->ag_constraints.insert(make_pair(replan_ag, tmp_cons));
+			}
+			else  // The agent already needs to be replanned
+			{
+				node->ag_constraints[replan_ag].push_back(parent->sorted_conflicts[i]->constraint1);
+			}
+		}
+		else
+		{
+			replan_ag = parent->sorted_conflicts[i]->a2;
+			if (node->ag_constraints.find(replan_ag) == node->ag_constraints.end())  // New replanned agent
+			{
+				list<list<Constraint>> tmp_cons;
+				tmp_cons.push_back(parent->sorted_conflicts[i]->constraint2);
+				node->ag_constraints.insert(make_pair(replan_ag, tmp_cons));
+			}
+			else  // The agent already needs to be replanned
+			{
+				node->ag_constraints[replan_ag].push_back(parent->sorted_conflicts[i]->constraint2);
+			}
+		}
+	}
+
+	if (screen > 2)
+	{
+		cout << "constraint assignment: ";
+		for (int i = 0; i < k_val; i++)
+			cout << constraint_assignments[i] << " ";
+		cout << endl;
+
+		for (const auto& ag_con : node->ag_constraints)
+		{
+			cout << "agent: " << ag_con.first << endl;
+			for (const list<Constraint>& cons : ag_con.second)
+			{
+				for (const Constraint& con : cons)
+				{
+					// int a, x, y, t;
+					// constraint_type type;
+					// tie(a, x, y, t, type) = con;
+					// cout << "\t<" << a << ", " << x << ", " << y << ", " << t << ", " << type << endl;
+					cout << con << endl;
+				}
+			}
+		}
+	}
+
+	for (const auto& ag_cons : node->ag_constraints)
+	{
+		int replan_ag = ag_cons.first;
+		// Ignore any types of constraints
+		int lowerbound = (int) paths[replan_ag]->size() - 1;
+		if (!findPathForSingleAgentPeko(node, replan_ag, lowerbound))
+		{
+			runtime_generate_child += (double) (clock() - t1) / CLOCKS_PER_SEC;
+			return false;
+		}
+	}
+
+	assert(!node->paths.empty());
+	findConflicts(*node);
+	heuristic_helper.computeQuickHeuristics(*node);
+	runtime_generate_child += (double) (clock() - t1) / CLOCKS_PER_SEC;
+	return true;
+}
+
+
 inline void CBS::pushNode(CBSNode* node)
 {
 	// update handles
@@ -521,6 +694,15 @@ inline void CBS::pushNode(CBSNode* node)
 	if (node->g_val + node->h_val <= focal_list_threshold)
 		node->focal_handle = focal_list.push(node);
 	allNodes_table.push_back(node);
+}
+
+
+inline vector<bool> CBS::getBits(int number)
+{
+	vector<bool> output(k_val, 0);
+	for (int i = 0; i < k_val; i++)
+		output[i] = (number >> i) & 1;
+	return output;
 }
 
 
@@ -1061,6 +1243,145 @@ bool CBS::solve(double _time_limit, int _cost_lowerbound, int _cost_upperbound)
 	return solution_found;
 }
 
+
+bool CBS::solvePeko(double _time_limit, int _cost_lowerbound, int _cost_upperbound)
+{
+	min_f_val = _cost_lowerbound;
+	cost_upperbound = _cost_upperbound;
+	time_limit = _time_limit;
+
+	if (screen > 0)
+	{
+		string name = getSolverName();
+		name.resize(35, ' ');
+		cout << name << ": ";
+	}
+	// set timer
+	start = clock();
+
+	generateRoot();
+
+	while (!open_list.empty() && !solution_found)
+	{
+		updateFocalList();
+		if (min_f_val >= cost_upperbound)
+		{
+			solution_cost = (int) min_f_val;
+			solution_found = false;
+			break;
+		}
+		runtime = (double) (clock() - start) / CLOCKS_PER_SEC;
+		if (runtime > time_limit || num_HL_expanded > node_limit
+			|| heuristic_helper.sub_instances.size() >= MAX_NUM_STATS)
+		{
+			// time out or node out
+			solution_cost = -1;
+			solution_found = false;
+			break;
+		}
+
+		CBSNode* curr = focal_list.top();
+		focal_list.pop();
+		open_list.erase(curr->open_handle);
+		// takes the paths_found_initially and UPDATE all constrained paths found for agents 
+		// from curr to dummy_start (and lower-bounds)
+		updatePaths(curr);
+
+		if (screen > 1)
+			cout << endl << "Pop " << *curr << "h_computed: " << curr->h_computed << endl;
+		if (curr->unknownConf.size() + curr->conflicts.size() == 0)
+		{
+			solution_found = true;
+			solution_cost = curr->g_val;
+			goal_node = curr;
+			break;
+		}
+
+		if (!curr->h_computed) // heuristics has not been computed yet
+		{
+			if (PC) // prioritize conflicts
+				classifyConflicts(*curr);
+			else
+				sortConflicts(*curr);
+			
+			runtime = (double) (clock() - start) / CLOCKS_PER_SEC;
+			bool succ = heuristic_helper.computeInformedHeuristics(*curr, time_limit - runtime);
+			runtime = (double) (clock() - start) / CLOCKS_PER_SEC;
+			if (runtime > time_limit)
+			{  // timeout
+				solution_cost = -1;
+				solution_found = false;
+				break;
+			}
+			if (!succ) // no solution, so prune this node
+			{
+				curr->clear();
+				continue;
+			}
+
+			// reinsert the node
+			curr->open_handle = open_list.push(curr);
+			if (curr->g_val + curr->h_val <= focal_list_threshold)
+				curr->focal_handle = focal_list.push(curr);
+			if (screen == 2)
+			{
+				cout << "	Reinsert " << *curr << endl;
+			}
+			continue;
+		}
+
+		//Expand the node
+		num_HL_expanded++;
+		curr->time_expanded = num_HL_expanded;
+		vector<CBSNode*> children(pow(2, k_val), nullptr);
+		vector<bool> solved(pow(2, k_val), false);
+		vector<Path*> copy(paths);
+		for (int n_idx = 0; n_idx < pow(2, k_val); n_idx++)
+		{
+			if (n_idx > 0)
+				paths = copy;
+			children[n_idx] = new CBSNode();
+			vector<bool> constraint_assignment = getBits(n_idx);
+			solved[n_idx] = generateChildPeko(children[n_idx], curr, constraint_assignment);
+			if (!solved[n_idx])
+			{
+				delete children[n_idx];
+				continue;
+			}
+			else if (children[n_idx]->g_val + children[n_idx]->h_val == min_f_val &&
+				curr->unknownConf.size() + curr->conflicts.size() == 0)  // Optimal solution and no conflicts
+			{
+				break;
+			}		
+		}
+		for (int n_idx = 0; n_idx < pow(2, k_val); n_idx++)
+		{
+			if (solved[n_idx])
+			{
+				pushNode(children[n_idx]);
+				if (screen > 1)
+				{
+					cout << "\tGenerate " << *children[n_idx];
+					cout << ", depth:" << children[n_idx]->depth << endl;
+				}
+			}
+		}
+		curr->clear();
+	}  // end of while loop
+
+	runtime = (double) (clock() - start) / CLOCKS_PER_SEC;
+	if (solution_found && !validateSolution())
+	{
+		cout << "Solution invalid!!!" << endl;
+		printPaths();
+		exit(-1);
+	}
+	if (screen == 2)
+		printPaths();
+	if (screen > 0)
+		printResults();
+	return solution_found;
+}
 
 
 CBS::CBS(vector<SingleAgentSolver*>& search_engines,

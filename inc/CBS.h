@@ -56,10 +56,12 @@ public:
 	void setBypass(bool b) { bypass = b; } // 2-agent solver for heuristic calculation does not need bypass strategy.
 	void setNodeLimit(int n) { node_limit = n; }
 	void setSavingStats(bool s) { save_stats = s; heuristic_helper.save_stats = s; }
+	void setKConflicts(int _k) {k_val = _k; }
 
 	////////////////////////////////////////////////////////////////////////////////////////////
 	// Runs the algorithm until the problem is solved or time is exhausted 
 	bool solve(double time_limit, int cost_lowerbound = 0, int cost_upperbound = MAX_COST);
+	bool solvePeko(double _time_limit, int _cost_lowerbound=0, int _cost_upperbound=MAX_COST);
 
 	CBS(const Instance& instance, bool sipp, int screen);
 	CBS(vector<SingleAgentSolver*>& search_engines,
@@ -103,7 +105,8 @@ private:
 	int node_limit = MAX_NODES;
 	double focal_w = 1.0;
 	int cost_upperbound = MAX_COST;
-
+	int k_val = 1;
+	int num_of_branches = k_val;
 
 	vector<ConstraintTable> initial_constraints;
 	clock_t start;
@@ -119,7 +122,9 @@ private:
 
 	// high level search
 	bool findPathForSingleAgent(CBSNode*  node, int ag, int lower_bound = 0);
+	bool findPathForSingleAgentPeko(CBSNode*  node, int ag, int lower_bound = 0);
 	bool generateChild(CBSNode* child, CBSNode* curr);
+	bool generateChildPeko(CBSNode* child, CBSNode* curr, const vector<bool>& constraint_assignments);
 	bool generateRoot();
 
 	//conflicts
@@ -127,6 +132,7 @@ private:
 	void findConflicts(CBSNode& curr, int a1, int a2);
 	shared_ptr<Conflict> chooseConflict(const CBSNode &node) const;
 	void classifyConflicts(CBSNode &parent);
+	void sortConflicts(CBSNode& node);
 	// void copyConflicts(const list<shared_ptr<Conflict>>& conflicts,
 	// 	list<shared_ptr<Conflict>>& copy, int excluded_agent) const;
 	static void copyConflicts(const list<shared_ptr<Conflict>>& conflicts,
@@ -151,4 +157,5 @@ private:
 	bool validateSolution() const;
 	inline int getAgentLocation(int agent_id, size_t timestep) const;
 	inline void pushNode(CBSNode* node);
+	inline vector<bool> getBits(int number);
 };

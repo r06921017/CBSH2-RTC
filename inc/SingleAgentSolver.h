@@ -88,6 +88,8 @@ public:
 
 	virtual Path findPath(const CBSNode& node, const ConstraintTable& initial_constraints,
 		const vector<Path*>& paths, int agent, int lower_bound) = 0;
+	virtual Path findPathPeko(const CBSNode& node, const ConstraintTable& initial_constraints,
+		const vector<Path*>& paths, int agent, int lower_bound) = 0;
 	virtual int getTravelTime(int end, const ConstraintTable& constraint_table, int upper_bound) = 0;
 	virtual string getName() const = 0;
 

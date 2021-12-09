@@ -30,6 +30,7 @@ public:
 
 	void copy(const ConstraintTable& other);
 	void build(const CBSNode& node, int agent); // build the constraint table for the given agent at the given node
+	void buildPeko(const CBSNode& node, int agent);  // build the constraint table for the agent with 2^k-constraints
 	void buildCAT(int agent, const vector<Path*>& paths, size_t cat_size); // build the conflict avoidance table
 
 	void insert2CT(size_t loc, int t_min, int t_max); // insert a vertex constraint to the constraint table

@@ -596,16 +596,16 @@ bool CBS::generateChildPeko(CBSNode* node, CBSNode* parent, const vector<bool>& 
 
 	assert(constraint_assignments.size() == parent->k_val);
 
-	if (screen > 2)
-	{
-		cout << "All conflict of node:" << endl;
-		printConflicts(*parent);
-		cout << "------------------------------------" << endl;
-		cout << "Sorted conflicts:" << endl;
-		for (const auto& conf : parent->sorted_conflicts)
-			cout << *conf << endl;
-		cout << endl;
-	}
+	// if (screen > 2)
+	// {
+	// 	cout << "All conflict of node:" << endl;
+	// 	printConflicts(*parent);
+	// 	cout << "------------------------------------" << endl;
+	// 	cout << "Sorted conflicts:" << endl;
+	// 	for (const auto& conf : parent->sorted_conflicts)
+	// 		cout << *conf << endl;
+	// 	cout << endl;
+	// }
 
 	for (int i = 0; i < parent->k_val; i++)
 	{
@@ -640,29 +640,29 @@ bool CBS::generateChildPeko(CBSNode* node, CBSNode* parent, const vector<bool>& 
 		}
 	}
 
-	if (screen > 2)
-	{
-		cout << "constraint assignment: ";
-		for (int i = 0; i < parent->k_val; i++)
-			cout << constraint_assignments[i] << " ";
-		cout << endl;
+	// if (screen > 2)
+	// {
+	// 	cout << "constraint assignment: ";
+	// 	for (int i = 0; i < parent->k_val; i++)
+	// 		cout << constraint_assignments[i] << " ";
+	// 	cout << endl;
 
-		for (const auto& ag_con : node->ag_constraints)
-		{
-			cout << "agent: " << ag_con.first << endl;
-			for (const list<Constraint>& cons : ag_con.second)
-			{
-				for (const Constraint& con : cons)
-				{
-					// int a, x, y, t;
-					// constraint_type type;
-					// tie(a, x, y, t, type) = con;
-					// cout << "\t<" << a << ", " << x << ", " << y << ", " << t << ", " << type << endl;
-					cout << con << endl;
-				}
-			}
-		}
-	}
+	// 	for (const auto& ag_con : node->ag_constraints)
+	// 	{
+	// 		cout << "agent: " << ag_con.first << endl;
+	// 		for (const list<Constraint>& cons : ag_con.second)
+	// 		{
+	// 			for (const Constraint& con : cons)
+	// 			{
+	// 				// int a, x, y, t;
+	// 				// constraint_type type;
+	// 				// tie(a, x, y, t, type) = con;
+	// 				// cout << "\t<" << a << ", " << x << ", " << y << ", " << t << ", " << type << endl;
+	// 				cout << con << endl;
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 	for (const auto& ag_cons : node->ag_constraints)
 	{
@@ -1254,7 +1254,7 @@ bool CBS::solvePeko(double _time_limit, int _cost_lowerbound, int _cost_upperbou
 		cout << name << ": ";
 	}
 	// set timer
-	start = clock();
+	if( clock_gettime(CLOCK_REALTIME, &start_peko) == -1) { perror("clock gettime");}
 
 	generateRoot();
 
@@ -1267,7 +1267,8 @@ bool CBS::solvePeko(double _time_limit, int _cost_lowerbound, int _cost_upperbou
 			solution_found = false;
 			break;
 		}
-		runtime = (double) (clock() - start) / CLOCKS_PER_SEC;
+		
+		updateRuntime();
 		if (runtime > time_limit || num_HL_expanded > node_limit
 			|| heuristic_helper.sub_instances.size() >= MAX_NUM_STATS)
 		{
@@ -1301,9 +1302,10 @@ bool CBS::solvePeko(double _time_limit, int _cost_lowerbound, int _cost_upperbou
 			else
 				sortConflicts(*curr);
 			
-			runtime = (double) (clock() - start) / CLOCKS_PER_SEC;
+			updateRuntime();
 			bool succ = heuristic_helper.computeInformedHeuristics(*curr, time_limit - runtime);
-			runtime = (double) (clock() - start) / CLOCKS_PER_SEC;
+
+			updateRuntime();
 			if (runtime > time_limit)
 			{  // timeout
 				solution_cost = -1;
@@ -1336,23 +1338,20 @@ bool CBS::solvePeko(double _time_limit, int _cost_lowerbound, int _cost_upperbou
 		vector<bool> solved((int)pow(2, curr->k_val), false);
 		vector<Path*> copy(paths);
 
-		int n_idx, tid;  // Private variable
+		// debug
+		size_t curr_open_size = open_list.size();
 
-		clock_t t1 = clock();
+		int n_idx, tid;  // Private variable
 		omp_set_num_threads((int)pow(2, curr->k_val));
+		struct timespec start_child, stop_child;  // Set timer
+		if( clock_gettime(CLOCK_REALTIME, &start_child) == -1) { perror("clock gettime");}
+
 		#pragma omp parallel shared(children, solved, copy) private(n_idx, tid)
 		{
 			tid = omp_get_thread_num();
 			#pragma omp for schedule(static, (int)pow(2, curr->k_val))
 			for (n_idx = 0; n_idx < (int)pow(2, curr->k_val); n_idx++)
 			{
-				if (tid == 0)
-				{
-					int nthread = omp_get_num_threads();
-					cout << "Number of threads: " << nthread << endl;
-					cout << endl;
-				}
-
 				if (n_idx > 0)
 					paths = copy;
 				children[n_idx] = new CBSNode();
@@ -1363,11 +1362,11 @@ bool CBS::solvePeko(double _time_limit, int _cost_lowerbound, int _cost_upperbou
 					delete children[n_idx];
 					continue;
 				}
-				// else if (children[n_idx]->g_val + children[n_idx]->h_val == min_f_val &&
-				// 	curr->unknownConf.size() + curr->conflicts.size() == 0)  // Optimal solution and no conflicts
-				// {
-				// 	break;
-				// }
+				else if (children[n_idx]->g_val + children[n_idx]->h_val == min_f_val &&
+					curr->unknownConf.size() + curr->conflicts.size() == 0)  // Optimal solution and no conflicts
+				{
+					goal_node = curr;
+				}
 				else
 				{
 					pushNode(children[n_idx]);
@@ -1377,14 +1376,19 @@ bool CBS::solvePeko(double _time_limit, int _cost_lowerbound, int _cost_upperbou
 						cout << ", depth:" << children[n_idx]->depth << endl;
 					}
 				}
-				
 			}
 		}
-		runtime_generate_child += (double) (clock() - t1) / CLOCKS_PER_SEC;
-		curr->clear();
+		if( clock_gettime( CLOCK_REALTIME, &stop_child) == -1 ) { perror("clock gettime");}		
+		runtime_generate_child += ((stop_child.tv_sec - start_child.tv_sec) + (double)(stop_child.tv_nsec - start_child.tv_nsec)/1e9);
+
+		// debug
+		// size_t new_open_size = open_list.size();
+		// cout << "open list size, old:" << curr_open_size << ", new:" << new_open_size << endl;
+		// cout << endl;
+
 	}  // end of while loop
 
-	runtime = (double) (clock() - start) / CLOCKS_PER_SEC;
+	updateRuntime();
 	if (solution_found && !validateSolution())
 	{
 		cout << "Solution invalid!!!" << endl;
@@ -1625,4 +1629,12 @@ void CBS::clear()
 	goal_node = nullptr;
 	solution_found = false;
 	solution_cost = -2;
+}
+
+
+inline void CBS::updateRuntime(void)
+{
+	if( clock_gettime( CLOCK_REALTIME, &stop_peko) == -1 )
+		perror("clock gettime");
+	runtime = (stop_peko.tv_sec - start_peko.tv_sec)+ (double)(stop_peko.tv_nsec - start_peko.tv_nsec)/1e9;
 }

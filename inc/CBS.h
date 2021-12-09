@@ -159,4 +159,5 @@ private:
 	inline int getAgentLocation(int agent_id, size_t timestep) const;
 	inline void pushNode(CBSNode* node);
 	inline vector<bool> getBits(int number, int _k_val);
+	inline void updateRuntime(void);
 };

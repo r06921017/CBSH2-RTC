@@ -363,8 +363,8 @@ void CBS::sortConflicts(CBSNode& node)
 	for (shared_ptr<Conflict> conf : node.unknownConf)
 		tmp_conflicts.push(conf);
 
-	k_val = min((int)tmp_conflicts.size(), k_val);  // k_val may decrease if #conflicts < #processors
-	for (int i = 0; i < k_val; i++)  // Pick the top k conflicts
+	node.k_val = min((int)tmp_conflicts.size(), k_val);  // k_val may decrease if #conflicts < #processors
+	for (int i = 0; i < node.k_val; i++)  // Pick the top k conflicts
 	{
 		shared_ptr<Conflict> top_conf = tmp_conflicts.top(); 
 		tmp_conflicts.pop();
@@ -589,13 +589,12 @@ bool CBS::generateChild(CBSNode* node, CBSNode* parent)
 
 bool CBS::generateChildPeko(CBSNode* node, CBSNode* parent, const vector<bool>& constraint_assignments)
 {
-	clock_t t1 = clock();
 	node->parent = parent;
 	node->g_val = parent->g_val;
 	node->makespan = parent->makespan;
 	node->depth = parent->depth + 1;
 
-	assert(constraint_assignments.size() == k_val);
+	assert(constraint_assignments.size() == parent->k_val);
 
 	if (screen > 2)
 	{
@@ -608,7 +607,7 @@ bool CBS::generateChildPeko(CBSNode* node, CBSNode* parent, const vector<bool>& 
 		cout << endl;
 	}
 
-	for (int i = 0; i < k_val; i++)
+	for (int i = 0; i < parent->k_val; i++)
 	{
 		int replan_ag = -1;
 		if (!constraint_assignments[i])
@@ -644,7 +643,7 @@ bool CBS::generateChildPeko(CBSNode* node, CBSNode* parent, const vector<bool>& 
 	if (screen > 2)
 	{
 		cout << "constraint assignment: ";
-		for (int i = 0; i < k_val; i++)
+		for (int i = 0; i < parent->k_val; i++)
 			cout << constraint_assignments[i] << " ";
 		cout << endl;
 
@@ -672,7 +671,6 @@ bool CBS::generateChildPeko(CBSNode* node, CBSNode* parent, const vector<bool>& 
 		int lowerbound = (int) paths[replan_ag]->size() - 1;
 		if (!findPathForSingleAgentPeko(node, replan_ag, lowerbound))
 		{
-			runtime_generate_child += (double) (clock() - t1) / CLOCKS_PER_SEC;
 			return false;
 		}
 	}
@@ -680,7 +678,6 @@ bool CBS::generateChildPeko(CBSNode* node, CBSNode* parent, const vector<bool>& 
 	assert(!node->paths.empty());
 	findConflicts(*node);
 	heuristic_helper.computeQuickHeuristics(*node);
-	runtime_generate_child += (double) (clock() - t1) / CLOCKS_PER_SEC;
 	return true;
 }
 
@@ -697,10 +694,10 @@ inline void CBS::pushNode(CBSNode* node)
 }
 
 
-inline vector<bool> CBS::getBits(int number)
+inline vector<bool> CBS::getBits(int number, int _k_val)
 {
-	vector<bool> output(k_val, 0);
-	for (int i = 0; i < k_val; i++)
+	vector<bool> output(_k_val, 0);
+	for (int i = 0; i < _k_val; i++)
 		output[i] = (number >> i) & 1;
 	return output;
 }
@@ -1330,42 +1327,60 @@ bool CBS::solvePeko(double _time_limit, int _cost_lowerbound, int _cost_upperbou
 			continue;
 		}
 
-		//Expand the node
+		//Expand the node in parallel
 		num_HL_expanded++;
 		curr->time_expanded = num_HL_expanded;
-		vector<CBSNode*> children(pow(2, k_val), nullptr);
-		vector<bool> solved(pow(2, k_val), false);
+
+		// Share variables
+		vector<CBSNode*> children(pow(2, curr->k_val), nullptr);
+		vector<bool> solved((int)pow(2, curr->k_val), false);
 		vector<Path*> copy(paths);
-		for (int n_idx = 0; n_idx < pow(2, k_val); n_idx++)
+
+		int n_idx, tid;  // Private variable
+
+		clock_t t1 = clock();
+		omp_set_num_threads((int)pow(2, curr->k_val));
+		#pragma omp parallel shared(children, solved, copy) private(n_idx, tid)
 		{
-			if (n_idx > 0)
-				paths = copy;
-			children[n_idx] = new CBSNode();
-			vector<bool> constraint_assignment = getBits(n_idx);
-			solved[n_idx] = generateChildPeko(children[n_idx], curr, constraint_assignment);
-			if (!solved[n_idx])
+			tid = omp_get_thread_num();
+			#pragma omp for schedule(static, (int)pow(2, curr->k_val))
+			for (n_idx = 0; n_idx < (int)pow(2, curr->k_val); n_idx++)
 			{
-				delete children[n_idx];
-				continue;
-			}
-			else if (children[n_idx]->g_val + children[n_idx]->h_val == min_f_val &&
-				curr->unknownConf.size() + curr->conflicts.size() == 0)  // Optimal solution and no conflicts
-			{
-				break;
-			}		
-		}
-		for (int n_idx = 0; n_idx < pow(2, k_val); n_idx++)
-		{
-			if (solved[n_idx])
-			{
-				pushNode(children[n_idx]);
-				if (screen > 1)
+				if (tid == 0)
 				{
-					cout << "\tGenerate " << *children[n_idx];
-					cout << ", depth:" << children[n_idx]->depth << endl;
+					int nthread = omp_get_num_threads();
+					cout << "Number of threads: " << nthread << endl;
+					cout << endl;
 				}
+
+				if (n_idx > 0)
+					paths = copy;
+				children[n_idx] = new CBSNode();
+				vector<bool> constraint_assignment = getBits(n_idx, curr->k_val);
+				solved[n_idx] = generateChildPeko(children[n_idx], curr, constraint_assignment);
+				if (!solved[n_idx])
+				{
+					delete children[n_idx];
+					continue;
+				}
+				// else if (children[n_idx]->g_val + children[n_idx]->h_val == min_f_val &&
+				// 	curr->unknownConf.size() + curr->conflicts.size() == 0)  // Optimal solution and no conflicts
+				// {
+				// 	break;
+				// }
+				else
+				{
+					pushNode(children[n_idx]);
+					if (screen > 1)
+					{
+						cout << "\tGenerate " << *children[n_idx];
+						cout << ", depth:" << children[n_idx]->depth << endl;
+					}
+				}
+				
 			}
 		}
+		runtime_generate_child += (double) (clock() - t1) / CLOCKS_PER_SEC;
 		curr->clear();
 	}  // end of while loop
 

@@ -4,7 +4,7 @@
 #include "RectangleReasoning.h"
 #include "CorridorReasoning.h"
 #include "MutexReasoning.h"
-
+#include <omp.h>
 class CBS
 {
 public:
@@ -56,7 +56,7 @@ public:
 	void setBypass(bool b) { bypass = b; } // 2-agent solver for heuristic calculation does not need bypass strategy.
 	void setNodeLimit(int n) { node_limit = n; }
 	void setSavingStats(bool s) { save_stats = s; heuristic_helper.save_stats = s; }
-	void setKConflicts(int _k) {k_val = _k; }
+	void setKConflicts(int _k) {k_val = _k;}
 
 	////////////////////////////////////////////////////////////////////////////////////////////
 	// Runs the algorithm until the problem is solved or time is exhausted 
@@ -106,10 +106,11 @@ private:
 	double focal_w = 1.0;
 	int cost_upperbound = MAX_COST;
 	int k_val = 1;
-	int num_of_branches = k_val;
 
 	vector<ConstraintTable> initial_constraints;
 	clock_t start;
+
+	struct timespec start_peko, stop_peko;
 
 	int num_of_agents;
 
@@ -157,5 +158,5 @@ private:
 	bool validateSolution() const;
 	inline int getAgentLocation(int agent_id, size_t timestep) const;
 	inline void pushNode(CBSNode* node);
-	inline vector<bool> getBits(int number);
+	inline vector<bool> getBits(int number, int _k_val);
 };
